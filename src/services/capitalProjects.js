@@ -6,11 +6,11 @@ import apiClient from './api';
 export const fetchCapitalProjects = async () => {
   try {
     console.log('📡 Fetching capital projects from MREF...');
-    const response = await apiClient.get('/oslc/so/cstCapitalProjectRS');
+    const response = await apiClient.get('/oslc/spq/cstCapitalProjectQC?oslc.select=*');
     
     console.log('📦 Raw API Response:', response.data);
     
-    // Parse OSLC response
+    // Parse OSLC response - the real API uses 'rdfs:member'
     const members = response.data?.['rdfs:member'] || [];
     
     console.log(`📊 Found ${members.length} projects in response`);
@@ -21,21 +21,38 @@ export const fetchCapitalProjects = async () => {
     
     // Map OSLC fields to application format
     const projects = members.map((project, index) => {
+      const budget = parseFloat(project['spi:triBudgetOriginalRollupFR']) || 0;
+      const incurredInvoice = parseFloat(project['spi:triIncurredInvoiceRollupFR']) || 0;
+      const incurredPaid = parseFloat(project['spi:triIncurredPaidRollupFR']) || 0;
+      const commitmentOriginal = parseFloat(project['spi:triCommitmentOriginalRollupFR']) || 0;
+      const commitmentChanges = parseFloat(project['spi:triCommitmentChangesRollupFR']) || 0;
+      
+      // Calculate total spent (invoiced + paid)
+      const spent = incurredInvoice + incurredPaid;
+      
       return {
-        id: index + 1,
+        id: project['dcterms:identifier'] || `project-${index + 1}`,
+        projectId: project['spi:triIdTX'] || `ID-${index + 1}`,
         name: project['spi:triNameTX'] || 'Unnamed Project',
         status: project['spi:triStatusCL'] || 'Unknown',
-        budget: parseFloat(project['spi:triBudgetOriginalRollupFR']) || 0,
-        spent: parseFloat(project['spi:triBudgetSpentRollupFR']) || 0,
+        budget: budget,
+        spent: spent,
+        commitments: commitmentOriginal + commitmentChanges,
         phase: project['spi:triPhaseCL'] || 'N/A',
         projectManager: project['spi:triProjectLeadTX'] || 'Unassigned',
         startDate: project['spi:triProjectPlanStartDA'] || null,
         endDate: project['spi:triProjectPlanEndDA'] || null,
+        actualStartDate: project['spi:triProjectActualStartDA'] || null,
+        actualEndDate: project['spi:triProjectActualEndDA'] || null,
         location: project['spi:triProjectLocationTX'] || 'N/A',
         city: project['spi:triCityTX'] || 'N/A',
+        state: project['spi:triStateProvTX'] || 'N/A',
         country: project['spi:triCountryTX'] || 'N/A',
         classification: project['spi:triProjectClassificationLI'] || 'N/A',
+        projectType: project['spi:triProjectTypeLI'] || 'N/A',
         building: project['spi:triProjectLocationTX'] || 'N/A',
+        currency: project['spi:triCurrencyUO'] || 'USD',
+        organization: project['spi:OrgName'] || 'N/A',
         
         // Calculate derived fields
         progress: calculateProgress(project),
@@ -47,9 +64,11 @@ export const fetchCapitalProjects = async () => {
         ),
         
         // Additional fields
-        department: project['spi:triDepartmentTX'] || 'N/A',
         priority: determinePriority(project),
-        description: project['spi:triDescriptionTX'] || 'No description available'
+        description: `${project['spi:triProjectClassificationLI'] || 'Project'} in ${project['spi:triCityTX'] || 'Unknown Location'}`,
+        
+        // Raw data for debugging
+        _raw: project
       };
     });
     
