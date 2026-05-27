@@ -1,12 +1,98 @@
 import apiClient from './api';
 
 /**
- * Fetch all capital projects from MREF OSLC API
+ * Parse Budget data from embedded response
+ */
+const parseBudgetData = (budgetData) => {
+  if (!budgetData || typeof budgetData !== 'object') return null;
+  
+  return {
+    id: budgetData['dcterms:identifier'],
+    name: budgetData['spi:triNameTX'],
+    status: budgetData['spi:triStatusCL'],
+    budgetType: budgetData['spi:triBudgetTypeCL'],
+    estimatedCost: parseFloat(budgetData['spi:triEstimatedCostFR']) || 0,
+    totalCost: parseFloat(budgetData['spi:triTotalCostFR']) || 0,
+    budgetAmount: parseFloat(budgetData['spi:triBudgetAmountFR']) || 0,
+    currency: budgetData['spi:triCurrencyUO'],
+    forecastCost: parseFloat(budgetData['spi:triForecastCostFR']) || 0,
+    incurredCost: parseFloat(budgetData['spi:triIncurredCostFR']) || 0,
+    _raw: budgetData
+  };
+};
+
+/**
+ * Parse Proposal data from embedded response
+ */
+const parseProposalData = (proposalData) => {
+  if (!proposalData || typeof proposalData !== 'object') return null;
+  
+  return {
+    id: proposalData['dcterms:identifier'],
+    name: proposalData['spi:triNameTX'],
+    status: proposalData['spi:triStatusCL'],
+    proposalType: proposalData['spi:triProposalTypeCL'],
+    contactName: proposalData['spi:triContactNameTX'],
+    contactEmail: proposalData['spi:triContactEmailTX'],
+    proposalDate: proposalData['spi:triProposalDateDA'],
+    bidAmount: parseFloat(proposalData['spi:triBidAmountFR']) || 0,
+    _raw: proposalData
+  };
+};
+
+/**
+ * Parse Contracts data from embedded response
+ */
+const parseContractsData = (contractsData) => {
+  if (!contractsData) return [];
+  
+  const contracts = Array.isArray(contractsData) ? contractsData : [contractsData];
+  
+  return contracts
+    .filter(contract => contract && typeof contract === 'object' && !contract['rdf:resource'])
+    .map(contract => ({
+      id: contract['dcterms:identifier'],
+      name: contract['spi:triNameTX'],
+      status: contract['spi:triStatusCL'],
+      contractType: contract['spi:triContractTypeCL'],
+      approvedAmount: parseFloat(contract['spi:triApprovedAmountFR']) || 0,
+      changeOrders: parseFloat(contract['spi:triChangeOrdersFR']) || 0,
+      contractState: contract['spi:triContractStateCL'],
+      _raw: contract
+    }));
+};
+
+/**
+ * Parse Payment data from embedded response
+ */
+const parsePaymentData = (paymentData) => {
+  if (!paymentData) return [];
+  
+  const payments = Array.isArray(paymentData) ? paymentData : [paymentData];
+  
+  return payments
+    .filter(payment => payment && typeof payment === 'object' && !payment['rdf:resource'])
+    .map(payment => ({
+      id: payment['dcterms:identifier'],
+      name: payment['spi:triNameTX'],
+      status: payment['spi:triStatusCL'],
+      invoiceAmount: parseFloat(payment['spi:triInvoiceAmountFR']) || 0,
+      payee: payment['spi:triPayeeTX'],
+      paymentDate: payment['spi:triPaymentDateDA'],
+      _raw: payment
+    }));
+};
+
+/**
+ * Fetch all capital projects from MREF OSLC API with all related data
+ * Uses comprehensive query that includes Budget, Proposal, Contracts, and Payments
  */
 export const fetchCapitalProjects = async () => {
   try {
-    console.log('📡 Fetching capital projects from MREF...');
-    const response = await apiClient.get('/oslc/spq/cstCapitalProjectQC?oslc.select=*');
+    console.log('📡 Fetching capital projects with related data from MREF...');
+    const response = await apiClient.get(
+      '/oslc/spq/cstCapitalProjectQC?oslc.select=*,spi:cstBudget{*},spi:cstProposal{*},spi:cstContracts{*},spi:cstPayment{*}'
+    );
     
     console.log('📦 Raw API Response:', response.data);
     
@@ -19,7 +105,7 @@ export const fetchCapitalProjects = async () => {
       console.warn('⚠️ No projects found in MREF response');
     }
     
-    // Map OSLC fields to application format
+    // Map OSLC fields to application format with all related data
     const projects = members.map((project, index) => {
       const budget = parseFloat(project['spi:triBudgetOriginalRollupFR']) || 0;
       const incurredInvoice = parseFloat(project['spi:triIncurredInvoiceRollupFR']) || 0;
@@ -29,6 +115,30 @@ export const fetchCapitalProjects = async () => {
       
       // Calculate total spent (invoiced + paid)
       const spent = incurredInvoice + incurredPaid;
+      
+      // Parse embedded Budget data (now included in response)
+      const budgetData = project['spi:cstBudget'];
+      const budgetDetails = budgetData && typeof budgetData === 'object' && !budgetData['rdf:resource'] 
+        ? parseBudgetData(budgetData) 
+        : null;
+      
+      // Parse embedded Proposal data
+      const proposalData = project['spi:cstProposal'];
+      const proposalDetails = proposalData && typeof proposalData === 'object' && !proposalData['rdf:resource']
+        ? parseProposalData(proposalData)
+        : null;
+      
+      // Parse embedded Contracts data (can be array)
+      const contractsData = project['spi:cstContracts'];
+      const contractDetails = contractsData 
+        ? parseContractsData(contractsData)
+        : [];
+      
+      // Parse embedded Payment data (can be array)
+      const paymentData = project['spi:cstPayment'];
+      const paymentDetails = paymentData
+        ? parsePaymentData(paymentData)
+        : [];
       
       return {
         id: project['dcterms:identifier'] || `project-${index + 1}`,
@@ -67,12 +177,34 @@ export const fetchCapitalProjects = async () => {
         priority: determinePriority(project),
         description: `${project['spi:triProjectClassificationLI'] || 'Project'} in ${project['spi:triCityTX'] || 'Unknown Location'}`,
         
+        // Related data
+        budgetDetails: budgetDetails,
+        proposalDetails: proposalDetails,
+        contractDetails: contractDetails,
+        paymentDetails: paymentDetails,
+        
+        // Flags
+        hasBudget: budgetDetails !== null,
+        hasProposal: proposalDetails !== null,
+        hasContracts: contractDetails.length > 0,
+        hasPayments: paymentDetails.length > 0,
+        
         // Raw data for debugging
         _raw: project
       };
     });
     
+    const projectsWithBudgets = projects.filter(p => p.hasBudget).length;
+    const projectsWithProposals = projects.filter(p => p.hasProposal).length;
+    const projectsWithContracts = projects.filter(p => p.hasContracts).length;
+    const projectsWithPayments = projects.filter(p => p.hasPayments).length;
+    
     console.log(`✅ Fetched ${projects.length} capital projects from MREF`);
+    console.log(`   - ${projectsWithBudgets} with budgets`);
+    console.log(`   - ${projectsWithProposals} with proposals`);
+    console.log(`   - ${projectsWithContracts} with contracts`);
+    console.log(`   - ${projectsWithPayments} with payments`);
+    
     return projects;
     
   } catch (error) {
@@ -162,7 +294,7 @@ const determinePriority = (project) => {
 export const fetchProjectById = async (projectId) => {
   try {
     const projects = await fetchCapitalProjects();
-    return projects.find(p => p.id === parseInt(projectId));
+    return projects.find(p => p.id === projectId || p.id === parseInt(projectId));
   } catch (error) {
     console.error(`❌ Error fetching project ${projectId}:`, error.message);
     throw error;
@@ -190,8 +322,124 @@ export const getProjectStatistics = (projects) => {
     avgHealthScore: Math.round(
       projects.reduce((sum, p) => sum + p.healthScore, 0) / projects.length
     ),
-    highRiskCount: projects.filter(p => p.riskScore >= 60).length
+    highRiskCount: projects.filter(p => p.riskScore >= 60).length,
+    projectsWithBudgets: projects.filter(p => p.hasBudget).length,
+    projectsWithProposals: projects.filter(p => p.hasProposal).length,
+    projectsWithContracts: projects.filter(p => p.hasContracts).length,
+    projectsWithPayments: projects.filter(p => p.hasPayments).length
   };
+};
+
+/**
+ * Generate recommendations for a project based on real data
+ */
+export const generateProjectRecommendations = (project) => {
+  const recommendations = [];
+  
+  // Budget variance analysis
+  if (project.budget > 0) {
+    const variance = ((project.spent / project.budget) * 100);
+    if (variance > 90) {
+      recommendations.push({
+        type: 'warning',
+        category: 'Budget',
+        title: 'Budget Overrun Risk',
+        description: `Project has spent ${variance.toFixed(1)}% of budget. Immediate review required.`,
+        priority: 'high'
+      });
+    } else if (variance > 75) {
+      recommendations.push({
+        type: 'info',
+        category: 'Budget',
+        title: 'Budget Monitoring',
+        description: `Project has spent ${variance.toFixed(1)}% of budget. Monitor closely.`,
+        priority: 'medium'
+      });
+    }
+  }
+  
+  // Phase and status analysis
+  if (project.status.toLowerCase().includes('revision')) {
+    recommendations.push({
+      type: 'warning',
+      category: 'Status',
+      title: 'Revision In Progress',
+      description: 'Project is under revision. Ensure timely approval to avoid delays.',
+      priority: 'medium'
+    });
+  }
+  
+  // Contract analysis
+  if (project.hasContracts) {
+    const activeContracts = project.contractDetails.filter(c => 
+      c.status && c.status.toLowerCase().includes('active')
+    );
+    if (activeContracts.length > 0) {
+      recommendations.push({
+        type: 'success',
+        category: 'Contract',
+        title: 'Active Contracts',
+        description: `${activeContracts.length} active contract(s) in place.`,
+        priority: 'low'
+      });
+    }
+  }
+  
+  // Payment analysis
+  if (project.hasPayments) {
+    const pendingPayments = project.paymentDetails.filter(p =>
+      p.status && p.status.toLowerCase().includes('pending')
+    );
+    if (pendingPayments.length > 0) {
+      recommendations.push({
+        type: 'info',
+        category: 'Payment',
+        title: 'Pending Payments',
+        description: `${pendingPayments.length} payment(s) pending review.`,
+        priority: 'medium'
+      });
+    }
+  }
+  
+  // Proposal analysis
+  if (project.hasProposal && project.proposalDetails) {
+    if (project.proposalDetails.status && project.proposalDetails.status.toLowerCase().includes('pending')) {
+      recommendations.push({
+        type: 'warning',
+        category: 'Proposal',
+        title: 'Proposal Routing Required',
+        description: 'Proposal is pending approval. Expedite routing process.',
+        priority: 'high'
+      });
+    }
+  }
+  
+  // Timeline analysis
+  if (project.endDate) {
+    const endDate = new Date(project.endDate);
+    const today = new Date();
+    const daysUntilEnd = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+    
+    if (daysUntilEnd < 0) {
+      recommendations.push({
+        type: 'error',
+        category: 'Timeline',
+        title: 'Project Overdue',
+        description: `Project is ${Math.abs(daysUntilEnd)} days overdue. Immediate action required.`,
+        priority: 'high'
+      });
+    } else if (daysUntilEnd < 30) {
+      recommendations.push({
+        type: 'warning',
+        category: 'Timeline',
+        title: 'Approaching Deadline',
+        description: `Project deadline in ${daysUntilEnd} days. Ensure timely completion.`,
+        priority: 'medium'
+      });
+    }
+  }
+  
+  return recommendations;
 };
 
 // Made with Bob

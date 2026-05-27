@@ -17,14 +17,14 @@ import {
 const Sidebar = () => {
   const navItems = [
     { path: '/', icon: Home, label: 'Overview' },
-    { path: '/projects', icon: FolderKanban, label: 'Projects', disabled: true },
+    { path: '/projects', icon: FolderKanban, label: 'Projects' },
+    { path: '/budgets', icon: DollarSign, label: 'Budgets' },
+    { path: '/procurement', icon: ShoppingCart, label: 'Procurement' },
+    { path: '/reports', icon: FileText, label: 'Reports' },
+    { path: '/alerts', icon: Bell, label: 'Alerts' },
     { path: '/milestones', icon: Flag, label: 'Milestones', disabled: true },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks', disabled: true },
-    { path: '/budgets', icon: DollarSign, label: 'Budgets', disabled: true },
-    { path: '/procurement', icon: ShoppingCart, label: 'Procurement', disabled: true },
     { path: '/risks', icon: Shield, label: 'Risks', disabled: true },
-    { path: '/reports', icon: FileText, label: 'Reports', disabled: true },
-    { path: '/alerts', icon: Bell, label: 'Alerts', disabled: true },
     { path: '/settings', icon: Settings, label: 'Settings', disabled: true }
   ];
 
